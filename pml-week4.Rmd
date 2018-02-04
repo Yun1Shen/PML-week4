@@ -1,0 +1,103 @@
+---
+title: "Praticle Machine Learning Assignment4"
+author: "YunShen"
+date: "2/2/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+# Praticle Machine Learning Assginment 4:HAR(Human Activity Analysis)
+
+## library loading
+```{r libraryloading}
+library(knitr)
+library(caret)
+library(randomForest)
+library(ggplot2)
+library(corrplot)
+library(e1071)
+
+```
+
+## 1）Dataloading and cleaning
+First download the datasets if they are not in the working director  then cleaning the predictors with near zero variance method  then is none or the percentage of none value is more than 95%.
+
+```{r downloading and cleaning}
+# reading datasets
+if(!file.exists("pml-training.csv") | !file.exists("pml-testing.csv")){
+    trainingurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    testingurl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    training<-read.csv(url(trainingurl))
+    testing<-read.csv(url(trainingurl))
+}else{
+    training<-read.csv("pml-training.csv")
+    testing<-read.csv("pml-testing.csv")
+}
+#preproceesing trainining 
+NZV<-nearZeroVar(training)
+training<-training[,-NZV]
+trainingNA<-sapply(training, function(x) mean(is.na(x))>0.97)
+trainingnew<-training[,trainingNA == FALSE]
+#remove idntification 
+trainingnew<-trainingnew[,-(1:6)]
+dim(trainingnew)
+
+```
+## 2) Feature Selection
+Since reduce the number of predictors for feature selection,first preprocessing, then remove the highly correlated features ,then perform PCA onto them.
+
+```{r feature selection}
+removehighlycorr<-preProcess(trainingnew[,-53],method="corr")
+trainingnew2<-predict(removehighlycorr,trainingnew[,-53])
+testingnew2<-testing[,colnames(trainingnew2)]
+zscale<-preProcess(trainingnew2)
+scaledtrainingnew2<-predict(zscale,trainingnew2)
+scaledtestingnew2<-predict(zscale,testingnew2)
+pcatrain<-preProcess(scaledtrainingnew2,metho="pca", thresh = 0.99)
+pcatrain
+corrplot(cor(scaledtrainingnew2),type="upper",order = "original",tl.col = "black",tl.srt = 90,number.font = 0.5,tl.cex = 0.8)
+```  
+From the correlation matrix after remove the highly correlated feature and the PCA anaysis, we need 35 components which didn't reduce much predictor from the one just removed highly coreelated predictor(45), so we will not perform PCA on the scaled traingning set
+
+```{r}
+trainingfinal<-cbind(scaledtrainingnew2,trainingnew[,53])
+# spliting the training datasets
+colnames(trainingfinal)[46]<-"classe"
+inTrain<-createDataPartition(trainingfinal$classe, p=0.75, list = FALSE)
+trainingset<-trainingfinal[inTrain,]
+validationset<-trainingfinal[-inTrain,]
+```
+## 3) Training model
+### a) RandomForest
+```{r}
+set.seed(1000)
+RFsetting <- trainControl(method="cv", number=3, verboseIter=FALSE)
+FitRandForest <- train(classe ~ ., data=trainingset, method="rf",
+                          trControl=RFsetting)
+FitRandForest$finalModel
+predictRandForest <- predict(FitRandForest, newdata=validationset)
+confMatRandForest <- confusionMatrix(predictRandForest, validationset$classe)
+confMatRandForest$table
+accuracyRF<-confMatRandForest$overall[1]
+```
+
+The acuracy of random forest for the validation set is `r accuracyRF`  
+
+### b) SVM
+```{r}
+set.seed(1000)
+fitsvm <- svm(classe ~ . , trainingset)
+predictsvm<-predict(fitsvm,newdata = validationset)
+confMatSVM <- confusionMatrix(predictsvm, validationset$classe)
+accuracySVM<-confMatSVM$overall[1]
+```  
+Both the SVM model and random forest model have high accuracy,x but RF is better compared to the SVM acuracy  `r accuracySVM`  
+
+## 4) Predicting testingset
+```{r}
+predict(FitRandForest, newdata=scaledtestingnew2)
+```
